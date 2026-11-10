@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.sqlite3
+db.sqlite3
+
+# Django
+staticfiles/
+media/
+*.log
+logging
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Vercel
+.vercel/
