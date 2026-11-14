@@ -128,6 +128,28 @@ class PaystackInitiateView(APIView):
             "message": "Check your phone for the M-Pesa prompt",
         }, status=201)
 
+class WalletView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from ledger.services import get_worker_pass_wallet, get_worker_earnings_wallet, get_client_wallet
+        user = request.user
+        if user.role == "worker":
+            pw = get_worker_pass_wallet(user)
+            ew = get_worker_earnings_wallet(user)
+            return Response({
+                "pass": {"available": str(pw.available_balance)},
+                "earnings": {
+                    "pending": str(ew.pending_balance),
+                    "available": str(ew.available_balance),
+                },
+            })
+        elif user.role == "client":
+            cw = get_client_wallet(user)
+            return Response({
+                "client": {"available": str(cw.available_balance)},
+            })
+        return Response({"error": ["Unknown role"]}, status=400)
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PaystackWebhookView(APIView):

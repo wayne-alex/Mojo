@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .views import WithdrawalCreateView, WithdrawalListView, MpesaCallbackView, PaystackInitiateView, \
-    PaystackWebhookView
+    PaystackWebhookView, WalletView
 
 urlpatterns = [
     path("withdrawals/", WithdrawalCreateView.as_view(), name="withdrawal-create"),
@@ -9,4 +9,5 @@ urlpatterns = [
     path("mpesa/callback/", MpesaCallbackView.as_view(), name="mpesa-callback"),
     path("paystack/initiate/", PaystackInitiateView.as_view()),
     path("paystack/webhook/", PaystackWebhookView.as_view()),
+    path("wallet/", WalletView.as_view(), name="wallet-detail"),
 ]
