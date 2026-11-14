@@ -1,6 +1,7 @@
+import os
 from datetime import timedelta
 from pathlib import Path
-import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +22,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
     "accounts",
@@ -37,6 +39,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -77,7 +80,7 @@ else:
             "PASSWORD": os.getenv("DB_PASSWORD", ""),
             "HOST": os.getenv("DB_HOST", ""),
             "PORT": os.getenv("DB_PORT", "5432"),
-            "CONN_MAX_AGE": 0,  
+            "CONN_MAX_AGE": 0,
             "OPTIONS": {"sslmode": "require"},
         }
     }
@@ -116,10 +119,10 @@ MOJO_AUTO_APPROVE_DAYS = int(os.getenv("MOJO_AUTO_APPROVE_DAYS", "5"))
 MOJO_MAX_REVISIONS = int(os.getenv("MOJO_MAX_REVISIONS", "2"))
 MOJO_PLATFORM_FEE_PCT = os.getenv("MOJO_PLATFORM_FEE_PCT", "0.10")
 MOJO_PASS_TIERS = [
-    {"name": "small",  "min_budget": "0",      "max_budget": "10",     "pass_cost": 1},
-    {"name": "medium", "min_budget": "10.01",  "max_budget": "50",     "pass_cost": 2},
-    {"name": "large",  "min_budget": "50.01",  "max_budget": "200",    "pass_cost": 3},
-    {"name": "xl",     "min_budget": "200.01", "max_budget": "999999", "pass_cost": 5},
+    {"name": "small", "min_budget": "0", "max_budget": "10", "pass_cost": 1},
+    {"name": "medium", "min_budget": "10.01", "max_budget": "50", "pass_cost": 2},
+    {"name": "large", "min_budget": "50.01", "max_budget": "200", "pass_cost": 3},
+    {"name": "xl", "min_budget": "200.01", "max_budget": "999999", "pass_cost": 5},
 ]
 
 # --- Vercel Cron auth token ---
@@ -150,3 +153,11 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 CSRF_TRUSTED_ORIGINS = ['https://*.vercel.app']
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CORS_ALLOW_CREDENTIALS = True
+
+
