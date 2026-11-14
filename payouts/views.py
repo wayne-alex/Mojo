@@ -125,7 +125,7 @@ class PaystackInitiateView(APIView):
             "reference": pp.reference,
             "amount": str(pp.amount),
             "status": pp.status,
-            "message": "Check your phone for the M-Pesa prompt",
+            "authorization_url": pp.authorization_url,
         }, status=201)
 
 class WalletView(APIView):
