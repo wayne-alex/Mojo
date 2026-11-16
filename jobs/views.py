@@ -4,7 +4,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from django.conf import settings
 from accounts.permissions import IsClient, IsWorker
 from ledger.services import get_client_wallet
 from .models import Job, Bid
@@ -329,21 +329,7 @@ class CancelView(APIView):
 from textsight import TextSight  # Or checktica
 
 
-class CheckAIView(APIView):
-    permission_classes = [IsClient]
 
-    def post(self, request, pk):
-        job = Job.objects.get(pk=pk)
-        # 1. Deduct 10 bob from client wallet (you'll need to implement this logic)
-        # 2. Extract text from job.delivery_file (PDF/DOC parsing)
-        # 3. Call the AI detection API
-        ts = TextSight(api_key="...")
-        result = ts.detect(extracted_text)
-
-        # 4. Save the score
-        job.ai_score = result["humanization_score"]  # or ai_probability * 100
-        job.save()
-        return Response({"ai_score": job.ai_score})
 
 
 class SubmitSurveyView(APIView):
@@ -370,7 +356,10 @@ class CheckAIView(APIView):
             return Response({"error": ["Job not found"]}, status=404)
         except DjangoValidationError as e:
             return _service_error(e)
+
         return Response({
-            "ai_score": str(job.ai_score),
             "job_id": str(job.id),
+            "ai_score": str(job.ai_score),
+            "provider": settings.AI_DETECTION_PROVIDER,
+            "price_charged": settings.AI_CHECK_PRICE_KES,
         })

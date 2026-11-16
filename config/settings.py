@@ -174,3 +174,8 @@ STORAGES = {
     },
 }
 
+# --- AI Detection ---
+AI_CHECK_PRICE_KES = int(os.getenv("AI_CHECK_PRICE_KES", "10"))
+AI_DETECTION_PROVIDER = os.getenv("AI_DETECTION_PROVIDER", "fake")
+AI_DETECTION_API_KEY = os.getenv("AI_DETECTION_API_KEY", "")
+

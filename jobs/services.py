@@ -461,55 +461,67 @@ def submit_survey(job_id, worker, *, answers: dict):
 @transaction.atomic
 def check_ai_score(job_id, client):
     """
-    Deduct 10 KES from the client's wallet, analyze the delivery file,
-    and store the AI score on the job.
+    Deduct AI_CHECK_PRICE_KES from client wallet, run AI detection on
+    the delivered file, save the score, and return the updated job.
     """
-    import hashlib
     from ledger.services import (
-        get_client_wallet, get_platform_wallet, _locked, _apply,
+        get_client_wallet, _locked, _apply,
     )
     from ledger.models import Transaction
+    from .ai_detection import detect_ai, AIDetectionError
+    from .text_extraction import extract_text
 
     job = Job.objects.select_for_update().get(pk=job_id)
     if job.client_id != client.id:
         raise ValidationError("Not your job")
-    if job.status not in (Job.Status.DELIVERED,):
+    if job.status != Job.Status.DELIVERED:
         raise JobStateError("Can only check AI on delivered jobs")
     if job.ai_score is not None:
         raise ValidationError("AI check already performed for this job")
 
-    # Deduct 10 bob from client wallet
+    # 1. Extract text BEFORE charging — so failed extraction = no charge
+    text = extract_text(job.delivery_file) if job.delivery_file else ""
+    if not text and job.delivery_text:
+        text = job.delivery_text[:20000]
+
+    if len(text.strip()) < 20:
+        raise ValidationError(
+            "Could not extract enough text from the delivery to analyze. "
+            "Ask the worker to resubmit with a readable file or longer message."
+        )
+
+    # 2. Charge client wallet
     price = Decimal(str(settings.AI_CHECK_PRICE_KES))
     wallet = _locked(get_client_wallet(client).id)
     if wallet.available_balance < price:
-        raise ValidationError(f"Insufficient balance. Need KES {price} for AI check.")
+        raise ValidationError(
+            f"Insufficient balance. Need KES {price} for AI check."
+        )
 
     ref = f"ai_check:{job.id}"
-    _apply(wallet, "available_balance", -price,
-           Transaction.Type.ADJUSTMENT, ref,
-           meta={"reason": "ai_detection_fee", "job_id": str(job.id)})
+    _apply(
+        wallet, "available_balance", -price,
+        Transaction.Type.ADJUSTMENT, ref,
+        meta={
+            "reason": "ai_detection_fee",
+            "job_id": str(job.id),
+            "provider": settings.AI_DETECTION_PROVIDER,
+        },
+    )
 
-    # Extract text from the delivery file (simplified: read bytes)
-    text_sample = ""
-    if job.delivery_file:
-        try:
-            job.delivery_file.open()
-            raw = job.delivery_file.read()
-            text_sample = raw.decode("utf-8", errors="ignore")[:5000]
-        except Exception:
-            text_sample = ""
-    if not text_sample and job.delivery_text:
-        text_sample = job.delivery_text[:5000]
+    # 3. Run detection
+    try:
+        score = Decimal(str(detect_ai(text)))
+    except AIDetectionError as exc:
+        # Refund the charge — analysis failed
+        _apply(
+            wallet, "available_balance", price,
+            Transaction.Type.ADJUSTMENT, f"{ref}:refund",
+            meta={"reason": "ai_detection_refund", "error": str(exc)},
+        )
+        raise ValidationError(f"AI detection failed: {exc}") from exc
 
-    # Fake AI detection (deterministic by hash) — swap for real API later
-    if settings.AI_DETECTION_API_KEY:
-        # Real call placeholder — implement with your chosen provider
-        score = _call_ai_detector(text_sample)
-    else:
-        # Deterministic score from content hash (0–100)
-        h = hashlib.sha256(text_sample.encode()).hexdigest()
-        score = Decimal(str(int(h[:4], 16) % 100))
-
+    # 4. Save score
     job.ai_score = score
     job.save(update_fields=["ai_score"])
     return job
