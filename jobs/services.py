@@ -198,7 +198,7 @@ def accept_bid(client, job_id, bid_id):
 # ------------------------------------------------------------------ #
 
 @transaction.atomic
-def deliver(job_id, worker, *, delivery_text="", delivery_file_url=""):
+def deliver(job_id, worker, *, delivery_text="", delivery_file=None):
     job = Job.objects.select_for_update().get(pk=job_id)
     if job.status != Job.Status.IN_PROGRESS:
         raise JobStateError(f"Cannot deliver in status {job.status}")
@@ -207,18 +207,14 @@ def deliver(job_id, worker, *, delivery_text="", delivery_file_url=""):
 
     now = timezone.now()
     job.delivery_text = delivery_text
-    job.delivery_file_url = delivery_file_url
+    if delivery_file:
+        job.delivery_file = delivery_file
     job.delivered_at = now
-    from config.settings_helpers import get_auto_approve_days
-    auto_days = get_auto_approve_days()
-    job.auto_approve_at = now + timedelta(days=auto_days)
+    job.auto_approve_at = now + timedelta(days=settings.MOJO_AUTO_APPROVE_DAYS)
     job.status = Job.Status.DELIVERED
     job.save(update_fields=[
-        "delivery_text",
-        "delivery_file_url",
-        "delivered_at",
-        "auto_approve_at",
-        "status",
+        "delivery_text", "delivery_file", "delivered_at",
+        "auto_approve_at", "status",
     ])
 
     try:
@@ -230,7 +226,6 @@ def deliver(job_id, worker, *, delivery_text="", delivery_file_url=""):
         pass
 
     return job
-
 
 # ------------------------------------------------------------------ #
 # Step 8–9: client approves → escrow releases to worker pending       #
@@ -395,3 +390,134 @@ def run_pending_clear_batch(hours_hold=None):
         txn.save(update_fields=["cleared"])
         cleared += 1
     return cleared
+
+# ------------------------------------------------------------------ #
+# Survey submission with anti-bot validation                         #
+# ------------------------------------------------------------------ #
+
+@transaction.atomic
+def submit_survey(job_id, worker, *, answers: dict):
+    """
+    Validate survey answers against `survey_questions`. Each question
+    must have a `correct_answer` field for scoring. If accuracy < 60%,
+    the submission is rejected (bot detection).
+    """
+    job = Job.objects.select_for_update().get(pk=job_id)
+    if job.job_type != Job.JobType.SURVEY:
+        raise ValidationError("This job is not a survey")
+    if job.status != Job.Status.IN_PROGRESS:
+        raise JobStateError(f"Cannot submit survey in status {job.status}")
+    if not job.accepted_bid or job.accepted_bid.worker_id != worker.id:
+        raise ValidationError("Not your job to submit")
+
+    questions = job.survey_questions or []
+    if not questions:
+        raise ValidationError("No survey questions defined")
+
+    correct = 0
+    total = len(questions)
+    for q in questions:
+        qid = str(q["id"])
+        user_answer = answers.get(qid)
+        expected = q.get("correct_answer")
+        if expected and user_answer and str(user_answer).strip().lower() == str(expected).strip().lower():
+            correct += 1
+
+    accuracy = (correct / total) * 100 if total else 0
+
+    # Anti-bot: reject if accuracy is too low
+    if accuracy < 60:
+        raise ValidationError(
+            f"Survey accuracy too low ({accuracy:.0f}%). Bot-like behavior detected. "
+            "Your submission was rejected."
+        )
+
+    now = timezone.now()
+    job.survey_answers = answers
+    job.delivery_text = f"Survey submitted. Score: {correct}/{total} ({accuracy:.0f}%)"
+    job.delivered_at = now
+    job.auto_approve_at = now + timedelta(days=settings.MOJO_AUTO_APPROVE_DAYS)
+    job.status = Job.Status.DELIVERED
+    job.save(update_fields=[
+        "survey_answers", "delivery_text", "delivered_at",
+        "auto_approve_at", "status",
+    ])
+
+    try:
+        notify(job.client, kind=Notification.Kind.DELIVERED,
+               title="Survey submitted",
+               body=f"{job.title} — accuracy {accuracy:.0f}%. Review to approve.",
+               link=f"/jobs/{job.id}", reference=str(job.id))
+    except Exception:
+        pass
+
+    return job
+
+
+# ------------------------------------------------------------------ #
+# AI Content Check (costs 10 KES, deducts from client wallet)        #
+# ------------------------------------------------------------------ #
+
+@transaction.atomic
+def check_ai_score(job_id, client):
+    """
+    Deduct 10 KES from the client's wallet, analyze the delivery file,
+    and store the AI score on the job.
+    """
+    import hashlib
+    from ledger.services import (
+        get_client_wallet, get_platform_wallet, _locked, _apply,
+    )
+    from ledger.models import Transaction
+
+    job = Job.objects.select_for_update().get(pk=job_id)
+    if job.client_id != client.id:
+        raise ValidationError("Not your job")
+    if job.status not in (Job.Status.DELIVERED,):
+        raise JobStateError("Can only check AI on delivered jobs")
+    if job.ai_score is not None:
+        raise ValidationError("AI check already performed for this job")
+
+    # Deduct 10 bob from client wallet
+    price = Decimal(str(settings.AI_CHECK_PRICE_KES))
+    wallet = _locked(get_client_wallet(client).id)
+    if wallet.available_balance < price:
+        raise ValidationError(f"Insufficient balance. Need KES {price} for AI check.")
+
+    ref = f"ai_check:{job.id}"
+    _apply(wallet, "available_balance", -price,
+           Transaction.Type.ADJUSTMENT, ref,
+           meta={"reason": "ai_detection_fee", "job_id": str(job.id)})
+
+    # Extract text from the delivery file (simplified: read bytes)
+    text_sample = ""
+    if job.delivery_file:
+        try:
+            job.delivery_file.open()
+            raw = job.delivery_file.read()
+            text_sample = raw.decode("utf-8", errors="ignore")[:5000]
+        except Exception:
+            text_sample = ""
+    if not text_sample and job.delivery_text:
+        text_sample = job.delivery_text[:5000]
+
+    # Fake AI detection (deterministic by hash) — swap for real API later
+    if settings.AI_DETECTION_API_KEY:
+        # Real call placeholder — implement with your chosen provider
+        score = _call_ai_detector(text_sample)
+    else:
+        # Deterministic score from content hash (0–100)
+        h = hashlib.sha256(text_sample.encode()).hexdigest()
+        score = Decimal(str(int(h[:4], 16) % 100))
+
+    job.ai_score = score
+    job.save(update_fields=["ai_score"])
+    return job
+
+
+def _call_ai_detector(text: str) -> Decimal:
+    """Placeholder — plug in a real AI detection API here (GPTZero, Originality.ai, etc.)."""
+    # For now, deterministic based on content hash
+    import hashlib
+    h = hashlib.sha256(text.encode()).hexdigest()
+    return Decimal(str(int(h[:4], 16) % 100))

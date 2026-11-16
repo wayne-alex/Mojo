@@ -1,6 +1,6 @@
-from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -8,15 +8,14 @@ from rest_framework.views import APIView
 from accounts.permissions import IsClient, IsWorker
 from ledger.services import get_client_wallet
 from .models import Job, Bid
+from .scoring import top_bids_for_job
 from .serializers import (
     JobSerializer, JobCreateSerializer, BidReadSerializer,
-    BidCreateSerializer, BidFeedSerializer, JobFeedRowSerializer,
-)
+    BidCreateSerializer, BidFeedSerializer, )
 from .services import (
     post_job, place_bid, accept_bid, deliver, approve,
-    request_revision, cancel_job, JobStateError,
+    request_revision, cancel_job, submit_survey, check_ai_score,
 )
-from .scoring import top_bids_for_job
 
 
 # ------------------------------------------------------------------ #
@@ -252,13 +251,24 @@ class AcceptBidView(APIView):
 
 class DeliverView(APIView):
     permission_classes = [IsWorker]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, pk):
+        delivery_text = request.data.get("delivery_text", "")
+        delivery_file = request.FILES.get("delivery_file")
+
+        # File size check
+        if delivery_file and delivery_file.size > settings.MAX_UPLOAD_SIZE:
+            return Response(
+                {"error": [f"File exceeds {settings.MAX_UPLOAD_SIZE // (1024 * 1024)}MB limit"]},
+                status=400,
+            )
+
         try:
             job = deliver(
                 pk, request.user,
-                delivery_text=request.data.get("delivery_text", ""),
-                delivery_file_url=request.data.get("delivery_file_url", ""),
+                delivery_text=delivery_text,
+                delivery_file=delivery_file,
             )
         except Job.DoesNotExist:
             return Response({"error": ["Job not found"]}, status=404)
@@ -313,3 +323,54 @@ class CancelView(APIView):
         except DjangoValidationError as e:
             return _service_error(e)
         return Response(JobSerializer(job).data)
+
+
+# jobs/views.py
+from textsight import TextSight  # Or checktica
+
+
+class CheckAIView(APIView):
+    permission_classes = [IsClient]
+
+    def post(self, request, pk):
+        job = Job.objects.get(pk=pk)
+        # 1. Deduct 10 bob from client wallet (you'll need to implement this logic)
+        # 2. Extract text from job.delivery_file (PDF/DOC parsing)
+        # 3. Call the AI detection API
+        ts = TextSight(api_key="...")
+        result = ts.detect(extracted_text)
+
+        # 4. Save the score
+        job.ai_score = result["humanization_score"]  # or ai_probability * 100
+        job.save()
+        return Response({"ai_score": job.ai_score})
+
+
+class SubmitSurveyView(APIView):
+    permission_classes = [IsWorker]
+
+    def post(self, request, pk):
+        answers = request.data.get("answers", {})
+        try:
+            job = submit_survey(pk, request.user, answers=answers)
+        except Job.DoesNotExist:
+            return Response({"error": ["Job not found"]}, status=404)
+        except DjangoValidationError as e:
+            return _service_error(e)
+        return Response(JobSerializer(job).data)
+
+
+class CheckAIView(APIView):
+    permission_classes = [IsClient]
+
+    def post(self, request, pk):
+        try:
+            job = check_ai_score(pk, request.user)
+        except Job.DoesNotExist:
+            return Response({"error": ["Job not found"]}, status=404)
+        except DjangoValidationError as e:
+            return _service_error(e)
+        return Response({
+            "ai_score": str(job.ai_score),
+            "job_id": str(job.id),
+        })

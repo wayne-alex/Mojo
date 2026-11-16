@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     JobCreateView, JobFeedView, MyJobsView, JobDetailView,
     BidCreateView, TopBidsView, AcceptBidView,
-    DeliverView, ApproveView, ReviseView, CancelView,
+    DeliverView, ApproveView, ReviseView, CancelView, SubmitSurveyView, CheckAIView,
 )
 
 urlpatterns = [
@@ -17,4 +17,6 @@ urlpatterns = [
     path("<uuid:pk>/approve/", ApproveView.as_view(), name="job-approve"),
     path("<uuid:pk>/revise/", ReviseView.as_view(), name="job-revise"),
     path("<uuid:pk>/cancel/", CancelView.as_view(), name="job-cancel"),
+path("<uuid:pk>/submit-survey/", SubmitSurveyView.as_view(), name="job-submit-survey"),
+    path("<uuid:pk>/check-ai/", CheckAIView.as_view(), name="job-check-ai"),
 ]

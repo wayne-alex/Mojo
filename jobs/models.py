@@ -23,6 +23,16 @@ class Job(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
         related_name="jobs_posted",
     )
+
+    class JobType(models.TextChoices):
+        FREELANCE = "freelance", "Freelance"
+        SURVEY = "survey", "Survey"
+
+    job_type = models.CharField(max_length=16, choices=JobType.choices, default=JobType.FREELANCE)
+    attachment = models.FileField(upload_to='job_attachments/', null=True, blank=True)
+    survey_questions = models.JSONField(default=list, blank=True, null=True)
+
+
     title = models.CharField(max_length=200)
     description = models.TextField()
     deadline = models.DateTimeField()
@@ -32,6 +42,9 @@ class Job(models.Model):
     # Decision #1: client sets minimum level + required skills
     min_level = models.PositiveSmallIntegerField(default=1)
     required_skills = models.ManyToManyField(Skill, blank=True, related_name="jobs")
+    allow_ai = models.BooleanField(default=False)
+    ai_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    delivery_file = models.FileField(upload_to='deliveries/', null=True, blank=True)
 
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.DRAFT,

@@ -44,6 +44,8 @@ class JobSerializer(serializers.ModelSerializer):
     client_username = serializers.CharField(source="client.username", read_only=True)
     required_skills = SkillInlineSerializer(many=True, read_only=True)
     bid_count = serializers.IntegerField(read_only=True)
+    attachment_url = serializers.SerializerMethodField()
+    delivery_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
@@ -53,10 +55,20 @@ class JobSerializer(serializers.ModelSerializer):
             "status", "bid_window_ends_at", "bid_count", "pass_cost",
             "agreed_price", "revisions_used", "delivered_at",
             "auto_approve_at", "completed_at", "created_at",
-            "client_username",
-            "delivery_text",
-            "delivery_file_url",
+            "client_username", "job_type", "allow_ai", "ai_score",
+            "attachment_url", "delivery_file_url",
+            "delivery_text", "survey_questions",
         ]
+
+    def get_attachment_url(self, obj):
+        if obj.attachment:
+            return obj.attachment.url
+        return None
+
+    def get_delivery_file_url(self, obj):
+        if obj.delivery_file:
+            return obj.delivery_file.url
+        return obj.delivery_file_url if hasattr(obj, "delivery_file_url") else None
 
 
 # ------------------------------------------------------------------ #
