@@ -54,6 +54,8 @@ class JobSerializer(serializers.ModelSerializer):
             "agreed_price", "revisions_used", "delivered_at",
             "auto_approve_at", "completed_at", "created_at",
             "client_username",
+            "delivery_text",
+            "delivery_file_url",
         ]
 
 
